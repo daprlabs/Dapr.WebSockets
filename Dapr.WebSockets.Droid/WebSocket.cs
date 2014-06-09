@@ -13,7 +13,7 @@
     /// <summary>
     /// A reactive WebSocket abstraction.
     /// </summary>
-    public static class ReactiveWebSocket
+    public static class WebSocket
     {
         /// <summary>
         /// Connect to the provided WebSocket <paramref name="uri"/>, returning an observable used to receive messages.
@@ -67,7 +67,7 @@
         /// <returns>
         /// The observer used to send messages to the socket.
         /// </returns>
-        private static IObserver<string> SocketSendPump(WebSocket socket, CancellationToken cancellationToken)
+        private static IObserver<string> SocketSendPump(ClientWebSocket socket, CancellationToken cancellationToken)
         {
             var buffer = new byte[0];
             var process = new ActionBlock<string>[] { null };
@@ -109,7 +109,7 @@
         /// <param name="socket">The socket.</param>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>The observable stream of messages.</returns>
-        private static IObservable<string> SocketReceivePump(WebSocket socket, CancellationToken cancellationToken)
+        private static IObservable<string> SocketReceivePump(ClientWebSocket socket, CancellationToken cancellationToken)
         {
             return
                 Observable.Create<string>(observer => ReceivePump(observer, socket, cancellationToken).ToObservable().Subscribe(_ => { }, observer.OnError))
@@ -124,7 +124,7 @@
         /// <param name="socket">The socket.</param>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>A <see cref="Task"/> representing the work performed.</returns>
-        private static async Task ReceivePump(IObserver<string> observer, WebSocket socket, CancellationToken cancellationToken)
+        private static async Task ReceivePump(IObserver<string> observer, ClientWebSocket socket, CancellationToken cancellationToken)
         {
             try
             {
@@ -153,7 +153,7 @@
         /// <param name="buffer">The scratch buffer.</param>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>The received string.</returns>
-        private static async Task<string> ReceiveString(WebSocket socket, ArraySegment<byte> buffer, CancellationToken cancellationToken)
+        private static async Task<string> ReceiveString(ClientWebSocket socket, ArraySegment<byte> buffer, CancellationToken cancellationToken)
         {
             var result = new StringBuilder();
             WebSocketReceiveResult received;

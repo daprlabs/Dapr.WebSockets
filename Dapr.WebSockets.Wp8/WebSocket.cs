@@ -16,7 +16,7 @@
     /// <summary>
     /// A reactive WebSocket abstraction.
     /// </summary>
-    public static class ReactiveWebSocket
+    public static class WebSocket
     {
         /// <summary>
         /// Connect to the provided WebSocket <paramref name="uri"/>, returning an observable used to receive messages.
@@ -64,9 +64,9 @@
         /// <returns>
         /// A connected <see cref="WebSocket"/>.
         /// </returns>
-        private static async Task<WebSocket> ConnectSocket(Uri uri)
+        private static async Task<WebSocket4Net.WebSocket> ConnectSocket(Uri uri)
         {
-            var socket = new WebSocket(uri.ToString());
+            var socket = new WebSocket4Net.WebSocket(uri.ToString());
             var opened = Observable.FromEventPattern(_ => socket.Opened += _, _ => socket.Opened -= _);
             socket.Open();
             await opened.ToTask();
@@ -85,7 +85,7 @@
         /// <returns>
         /// The observer used to send messages to the socket.
         /// </returns>
-        private static IObserver<string> SocketSendPump(WebSocket socket, CancellationToken cancellationToken)
+        private static IObserver<string> SocketSendPump(WebSocket4Net.WebSocket socket, CancellationToken cancellationToken)
         {
             return Observer.Create<string>(
                 next =>
@@ -107,7 +107,7 @@
         /// <param name="socket">The socket.</param>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>The observable stream of messages.</returns>
-        private static IObservable<string> SocketReceivePump(WebSocket socket, CancellationToken cancellationToken)
+        private static IObservable<string> SocketReceivePump(WebSocket4Net.WebSocket socket, CancellationToken cancellationToken)
         {
             var closed = Observable.FromEventPattern(_ => socket.Closed += _, _ => socket.Closed -= _);
             var error = Observable.FromEventPattern<ErrorEventArgs>(_ => socket.Error += _, _ => socket.Error -= _);

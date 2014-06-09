@@ -14,7 +14,7 @@ namespace Dapr.WebSockets
     /// <summary>
     /// A reactive WebSocket abstraction.
     /// </summary>
-    public static class ReactiveWebSocket
+    public static class WebSocket
     {
         /// <summary>
         /// Connect to the provided WebSocket <paramref name="uri"/>, returning an observable used to receive messages.
