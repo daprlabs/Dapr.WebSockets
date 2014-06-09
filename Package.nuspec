@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<package >
+  <metadata>
+    <id>Dapr.WebSockets</id>
+    <version>0.1.0</version>
+    <authors>Reuben Bond</authors>
+    <owners>Dapr Labs</owners>
+    <!-- <licenseUrl>http://LICENSE_URL_HERE_OR_DELETE_THIS_LINE</licenseUrl>
+    <projectUrl>http://PROJECT_URL_HERE_OR_DELETE_THIS_LINE</projectUrl>
+    <iconUrl>http://ICON_URL_HERE_OR_DELETE_THIS_LINE</iconUrl> -->
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>Portable Class Library for WebSockets, wrapping platform-specific APIs.</description>
+    <releaseNotes>Initial attempt.</releaseNotes>
+    <copyright>Copyright 2014</copyright>
+    <tags>WebSockets WebSocket Xamarin Mono Droid Touch PCL</tags>
+    <dependencies>
+      <group>
+        <dependency id="Rx-Main" version="2.2.4" />
+      </group>
+      <group targetFramework="win8">
+        <dependency id="Rx-Main" version="2.2.4" />
+        <dependency id="Microsoft.Tpl.Dataflow" version="4.5.20" />
+      </group>
+    <group targetFramework="wp8">
+        <dependency id="Rx-Main" version="2.2.4" />
+        <dependency id="WebSocket4Net" version="0.9" />
+      </group>
+    <group targetFramework="sl50">
+        <dependency id="Rx-Main" version="2.2.4" />
+        <dependency id="WebSocket4Net" version="0.9" />
+      </group>
+    <group targetFramework="wpa8">
+        <dependency id="Rx-Main" version="2.2.4" />
+        <dependency id="Microsoft.Tpl.Dataflow" version="4.5.20" />
+      </group>
+    <group targetFramework="net45">
+        <dependency id="Rx-Main" version="2.2.4" />
+        <dependency id="Microsoft.Tpl.Dataflow" version="4.5.20" />
+      </group>
+    <group targetFramework="MonoAndroid">
+        <dependency id="Rx-Main" version="2.2.4" />
+        <dependency id="Microsoft.Tpl.Dataflow" version="4.5.20" />
+      </group>
+    <group targetFramework="MonoTouch">
+        <dependency id="Rx-Main" version="2.2.4" />
+        <dependency id="Microsoft.Tpl.Dataflow" version="4.5.20" />
+      </group>
+    </dependencies>
+  </metadata>
+  <files>
+    <file src="lib\Portable-Net45+SL50+Win8+WP8+WPA81+MonoAndroid+MonoTouch\Dapr.WebSockets.dll" target="lib\Portable-Net45+SL50+Win8+WP8+WPA81+MonoAndroid+MonoTouch\Dapr.WebSockets.dll" />
+    <file src="lib\Portable-Net45+SL50+Win8+WP8+WPA81+MonoAndroid+MonoTouch\System.Reactive.Interfaces.dll" target="lib\Portable-Net45+SL50+Win8+WP8+WPA81+MonoAndroid+MonoTouch\System.Reactive.Interfaces.dll" />
+    <file src="lib\MonoAndroid\Dapr.WebSockets.dll" target="lib\MonoAndroid\Dapr.WebSockets.dll" />
+    <file src="lib\Net45\Dapr.WebSockets.dll" target="lib\Net45\Dapr.WebSockets.dll" />
+    <file src="lib\MonoTouch\Dapr.WebSockets.dll" target="lib\MonoTouch\Dapr.WebSockets.dll" />
+    <file src="lib\Win8\Dapr.WebSockets.dll" target="lib\Win8\Dapr.WebSockets.dll" />
+    <file src="lib\WP8\Dapr.WebSockets.dll" target="lib\WP8\Dapr.WebSockets.dll" />
+    <file src="lib\WPA81\Dapr.WebSockets.dll" target="lib\WPA81\Dapr.WebSockets.dll" />
+  </files>
+</package>
