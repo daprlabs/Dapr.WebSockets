@@ -2,12 +2,12 @@
 {
     using System;
     using System.Reactive;
-    using System.Reactive.Disposables;
     using System.Reactive.Linq;
     using System.Reactive.Subjects;
     using System.Reactive.Threading.Tasks;
     using System.Threading;
     using System.Threading.Tasks;
+    using System.Threading.Tasks.Dataflow;
 
     using SuperSocket.ClientEngine;
 
@@ -109,24 +109,30 @@
         /// <returns>The observable stream of messages.</returns>
         private static IObservable<string> SocketReceivePump(WebSocket4Net.WebSocket socket, CancellationToken cancellationToken)
         {
-            var closed = Observable.FromEventPattern(_ => socket.Closed += _, _ => socket.Closed -= _);
-            var error = Observable.FromEventPattern<ErrorEventArgs>(_ => socket.Error += _, _ => socket.Error -= _);
-            var received = Observable.FromEventPattern<MessageReceivedEventArgs>(_ => socket.MessageReceived += _, _ => socket.MessageReceived -= _);
-            var canceled = new Subject<Unit>();
-            cancellationToken.Register(canceled.OnCompleted);
+            var dispose = new Action[] { null };
+            var incoming = new BufferBlock<string>();
+            EventHandler<MessageReceivedEventArgs> received = (sender, args) => incoming.Post(args.Message);
+            socket.MessageReceived += received;
+            EventHandler<ErrorEventArgs> errored = (sender, args) =>
+            {
+                ((ITargetBlock<string>)incoming).Fault(args.Exception);
+                dispose[0]();
+            };
+            socket.Error += errored;
+            EventHandler closed = (sender, args) => dispose[0]();
+            socket.Closed += closed;
 
-            return Observable.Create<string>(
-                observer =>
-                {
-                    var subscription = received.Select(e => e.EventArgs.Message).TakeUntil(closed).TakeUntil(error).TakeUntil(canceled).Subscribe(observer);
+            dispose[0] = () =>
+            {
+                incoming.Complete();
+                socket.MessageReceived -= received;
+                socket.Error -= errored;
+                socket.Closed -= closed;
+                socket.Close();
+            };
+            cancellationToken.Register(dispose[0]);
 
-                    return Disposable.Create(
-                        () =>
-                        {
-                            socket.Close();
-                            subscription.Dispose();
-                        });
-                }).Publish().RefCount();
+            return incoming.AsObservable().Publish().RefCount();
         }
 
         /// <summary>

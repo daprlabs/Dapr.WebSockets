@@ -2,12 +2,12 @@
 {
     using System;
     using System.Reactive;
-    using System.Reactive.Disposables;
     using System.Reactive.Linq;
     using System.Reactive.Subjects;
     using System.Reactive.Threading.Tasks;
     using System.Threading;
     using System.Threading.Tasks;
+    using System.Threading.Tasks.Dataflow;
 
     using SuperSocket.ClientEngine;
 
@@ -24,12 +24,10 @@
         /// <param name="uri">The uri.</param>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>The subject used to send and receive messages.</returns>
-        public static Task<IObservable<string>> ConnectOutput(Uri uri, CancellationToken cancellationToken)
+        public static async Task<IObservable<string>> ConnectOutput(Uri uri, CancellationToken cancellationToken)
         {
-            var tcs = new TaskCompletionSource<IObservable<string>>();
-            tcs.SetResult(
-            ConnectSocket(uri).ToObservable().SelectMany(socket => SocketReceivePump(socket, cancellationToken)));
-            return tcs.Task;
+            var socket = await ConnectSocket(uri);
+            return SocketReceivePump(socket, cancellationToken);
         }
 
         /// <summary>
@@ -38,9 +36,10 @@
         /// <param name="uri">The uri.</param>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>The observer used to send messages.</returns>
-        public static Task<IObserver<string>> ConnectInput(Uri uri, CancellationToken cancellationToken)
+        public static async Task<IObserver<string>> ConnectInput(Uri uri, CancellationToken cancellationToken)
         {
-            return ConnectSocket(uri).ContinueWith(socket => SocketSendPump(socket.Result, cancellationToken), cancellationToken);
+            var socket = await ConnectSocket(uri);
+            return SocketSendPump(socket, cancellationToken);
         }
 
         /// <summary>
@@ -49,15 +48,11 @@
         /// <param name="uri">The uri.</param>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>The subject used to send and receive messages.</returns>
-        public static Task<ISubject<string>> Connect(Uri uri, CancellationToken cancellationToken)
+        public static async Task<ISubject<string>> Connect(Uri uri, CancellationToken cancellationToken)
         {
-            return
-                ConnectSocket(uri)
-                    .ContinueWith(
-                        socket =>
-                        (ISubject<string>)
-                        new CombinedSubject<string>(SocketReceivePump(socket.Result, cancellationToken), SocketSendPump(socket.Result, cancellationToken)),
-                        cancellationToken);
+            var socket = await ConnectSocket(uri);
+
+            return new CombinedSubject<string>(SocketReceivePump(socket, cancellationToken), SocketSendPump(socket, cancellationToken));
         }
 
         /// <summary>
@@ -69,12 +64,13 @@
         /// <returns>
         /// A connected <see cref="WebSocket"/>.
         /// </returns>
-        private static Task<WebSocket4Net.WebSocket> ConnectSocket(Uri uri)
+        private static async Task<WebSocket4Net.WebSocket> ConnectSocket(Uri uri)
         {
             var socket = new WebSocket4Net.WebSocket(uri.ToString());
             var opened = Observable.FromEventPattern(_ => socket.Opened += _, _ => socket.Opened -= _);
             socket.Open();
-            return opened.Select(_ => socket).ToTask();
+            await opened.ToTask();
+            return socket;
         }
 
         /// <summary>
@@ -113,24 +109,30 @@
         /// <returns>The observable stream of messages.</returns>
         private static IObservable<string> SocketReceivePump(WebSocket4Net.WebSocket socket, CancellationToken cancellationToken)
         {
-            var closed = Observable.FromEventPattern(_ => socket.Closed += _, _ => socket.Closed -= _);
-            var error = Observable.FromEventPattern<ErrorEventArgs>(_ => socket.Error += _, _ => socket.Error -= _);
-            var received = Observable.FromEventPattern<MessageReceivedEventArgs>(_ => socket.MessageReceived += _, _ => socket.MessageReceived -= _);
-            var canceled = new Subject<Unit>();
-            cancellationToken.Register(canceled.OnCompleted);
+            var dispose = new Action[] { null };
+            var incoming = new BufferBlock<string>();
+            EventHandler<MessageReceivedEventArgs> received = (sender, args) => incoming.Post(args.Message);
+            socket.MessageReceived += received;
+            EventHandler<ErrorEventArgs> errored = (sender, args) =>
+            {
+                ((ITargetBlock<string>)incoming).Fault(args.Exception);
+                dispose[0]();
+            };
+            socket.Error += errored;
+            EventHandler closed = (sender, args) => dispose[0]();
+            socket.Closed += closed;
 
-            return Observable.Create<string>(
-                observer =>
-                {
-                    var subscription = received.Select(e => e.EventArgs.Message).TakeUntil(closed).TakeUntil(error).TakeUntil(canceled).Subscribe(observer);
+            dispose[0] = () =>
+            {
+                incoming.Complete();
+                socket.MessageReceived -= received;
+                socket.Error -= errored;
+                socket.Closed -= closed;
+                socket.Close();
+            };
+            cancellationToken.Register(dispose[0]);
 
-                    return Disposable.Create(
-                        () =>
-                        {
-                            socket.Close();
-                            subscription.Dispose();
-                        });
-                }).Publish().RefCount();
+            return incoming.AsObservable().Publish().RefCount();
         }
 
         /// <summary>

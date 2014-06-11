@@ -17,13 +17,16 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapr.WebSockets.Store", "Da
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapr.WebSockets.Wp8", "Dapr.WebSockets.Wp8\Dapr.WebSockets.Wp8.csproj", "{709897D1-994A-4438-91C7-ACF6585614CB}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapr.WebSockets.SL50", "Dapr.WebSockets.SL50\Dapr.WebSockets.SL50.csproj", "{46D7BC9E-C0DD-499E-81CD-FDC9750FD6A9}"
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".nuget", ".nuget", "{9ACC5B65-5A3D-46F9-91FA-E4392FBA0382}"
 	ProjectSection(SolutionItems) = preProject
 		.nuget\NuGet.Config = .nuget\NuGet.Config
 		.nuget\NuGet.exe = .nuget\NuGet.exe
 		.nuget\NuGet.targets = .nuget\NuGet.targets
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{540D0420-CDEB-4D6D-821E-AE87010A2B9B}"
+	ProjectSection(SolutionItems) = preProject
+		Package.nuspec = Package.nuspec
 	EndProjectSection
 EndProject
 Global
@@ -122,16 +125,6 @@ Global
 		{709897D1-994A-4438-91C7-ACF6585614CB}.Release|x64.ActiveCfg = Release|Any CPU
 		{709897D1-994A-4438-91C7-ACF6585614CB}.Release|x86.ActiveCfg = Release|x86
 		{709897D1-994A-4438-91C7-ACF6585614CB}.Release|x86.Build.0 = Release|x86
-		{46D7BC9E-C0DD-499E-81CD-FDC9750FD6A9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{46D7BC9E-C0DD-499E-81CD-FDC9750FD6A9}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{46D7BC9E-C0DD-499E-81CD-FDC9750FD6A9}.Debug|ARM.ActiveCfg = Debug|Any CPU
-		{46D7BC9E-C0DD-499E-81CD-FDC9750FD6A9}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{46D7BC9E-C0DD-499E-81CD-FDC9750FD6A9}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{46D7BC9E-C0DD-499E-81CD-FDC9750FD6A9}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{46D7BC9E-C0DD-499E-81CD-FDC9750FD6A9}.Release|Any CPU.Build.0 = Release|Any CPU
-		{46D7BC9E-C0DD-499E-81CD-FDC9750FD6A9}.Release|ARM.ActiveCfg = Release|Any CPU
-		{46D7BC9E-C0DD-499E-81CD-FDC9750FD6A9}.Release|x64.ActiveCfg = Release|Any CPU
-		{46D7BC9E-C0DD-499E-81CD-FDC9750FD6A9}.Release|x86.ActiveCfg = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
