@@ -4,10 +4,8 @@
     using System.Reactive;
     using System.Reactive.Linq;
     using System.Reactive.Subjects;
-    using System.Reactive.Threading.Tasks;
     using System.Threading;
     using System.Threading.Tasks;
-    using System.Threading.Tasks.Dataflow;
 
     using Windows.Foundation;
     using Windows.Networking.Sockets;
@@ -29,6 +27,7 @@
             var socket = CreateSocket();
             var cancellation = new CancellationTokenSource();
             var result = SocketReceivePump(socket, cancellation.Token);
+            cancellation.Token.Register(socket.Dispose);
             try
             {
                 await socket.ConnectAsync(uri).AsTask(cancellation.Token);
@@ -53,6 +52,7 @@
             cancellationToken.Register(cancellation.Cancel);
             var socket = CreateSocket();
             var result = SocketSendPump(socket, cancellation.Token);
+            cancellation.Token.Register(socket.Dispose);
             try
             {
                 await socket.ConnectAsync(uri).AsTask(cancellation.Token);
@@ -79,6 +79,7 @@
             cancellationToken.Register(cancellation.Cancel);
 
             var subject = new CombinedSubject<string>(SocketReceivePump(socket, cancellation.Token), SocketSendPump(socket, cancellation.Token));
+            cancellation.Token.Register(socket.Dispose);
             try
             {
                 await socket.ConnectAsync(uri).AsTask(cancellation.Token);
@@ -120,23 +121,20 @@
         private static IObserver<string> SocketSendPump(IWebSocket socket, CancellationToken cancellationToken)
         {
             var writer = new DataWriter(socket.OutputStream);
-            var outgoing = new ActionBlock<string>[] { null };
-            outgoing[0] = new ActionBlock<string>(
-                async next =>
-                {
-                    if (cancellationToken.IsCancellationRequested)
+            var subject = new Subject<string>();
+            var cancellation = new CancellationTokenSource();
+            cancellation.Token.Register(
+                subject.SelectMany(
+                    async next =>
                     {
-                        outgoing[0].Complete();
-                        return;
-                    }
+                        writer.WriteString(next);
+                        await writer.StoreAsync().AsTask(cancellationToken);
+                        return Unit.Default;
+                    }).Subscribe(_ => { }, e => cancellation.Cancel(), cancellation.Cancel).Dispose);
 
-                    writer.WriteString(next);
-                    await writer.StoreAsync().AsTask(cancellationToken);
-                });
+            cancellationToken.Register(cancellation.Cancel);
 
-            outgoing[0].Completion.ContinueWith(_ => socket.Dispose(), CancellationToken.None);
-
-            return outgoing[0].AsObserver();
+            return subject.AsObserver();
         }
 
         /// <summary>
@@ -147,31 +145,30 @@
         /// <returns>The observable stream of messages.</returns>
         private static IObservable<string> SocketReceivePump(MessageWebSocket socket, CancellationToken cancellationToken)
         {
-            var incoming = new BufferBlock<string>();
+            var subject = new Subject<string>();
             TypedEventHandler<MessageWebSocket, MessageWebSocketMessageReceivedEventArgs> read = (sender, args) =>
             {
                 try
                 {
                     if (cancellationToken.IsCancellationRequested)
                     {
-                        incoming.Complete();
+                        subject.OnCompleted();
                         return;
                     }
 
-                    incoming.Post(ReadString(args));
+                    subject.OnNext(ReadString(args));
                 }
                 catch (Exception e)
                 {
-                    ((ITargetBlock<string>)incoming).Fault(e);
+                    subject.OnError(e);
                 }
             };
-            TypedEventHandler<IWebSocket, WebSocketClosedEventArgs> closed = (sender, args) => incoming.Complete();
+            TypedEventHandler<IWebSocket, WebSocketClosedEventArgs> closed = (sender, args) => subject.OnCompleted();
             socket.MessageReceived += read;
             socket.Closed += closed;
 
-            var canceled = new Subject<Unit>();
-            cancellationToken.Register(canceled.OnCompleted);
-            return incoming.AsObservable().TakeUntil(canceled);
+            cancellationToken.Register(subject.OnCompleted);
+            return subject.AsObservable();
         }
 
         /// <summary>

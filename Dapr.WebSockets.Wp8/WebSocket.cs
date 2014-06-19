@@ -7,7 +7,6 @@
     using System.Reactive.Threading.Tasks;
     using System.Threading;
     using System.Threading.Tasks;
-    using System.Threading.Tasks.Dataflow;
 
     using SuperSocket.ClientEngine;
 
@@ -51,7 +50,6 @@
         public static async Task<ISubject<string>> Connect(Uri uri, CancellationToken cancellationToken)
         {
             var socket = await ConnectSocket(uri);
-
             return new CombinedSubject<string>(SocketReceivePump(socket, cancellationToken), SocketSendPump(socket, cancellationToken));
         }
 
@@ -110,21 +108,17 @@
         private static IObservable<string> SocketReceivePump(WebSocket4Net.WebSocket socket, CancellationToken cancellationToken)
         {
             var dispose = new Action[] { null };
-            var incoming = new BufferBlock<string>();
-            EventHandler<MessageReceivedEventArgs> received = (sender, args) => incoming.Post(args.Message);
-            socket.MessageReceived += received;
-            EventHandler<ErrorEventArgs> errored = (sender, args) =>
-            {
-                ((ITargetBlock<string>)incoming).Fault(args.Exception);
-                dispose[0]();
-            };
-            socket.Error += errored;
+            var incoming = new Subject<string>();
+            EventHandler<MessageReceivedEventArgs> received = (sender, args) => incoming.OnNext(args.Message);
+            EventHandler<ErrorEventArgs> errored = (sender, args) => incoming.OnError(args.Exception);
             EventHandler closed = (sender, args) => dispose[0]();
+            socket.MessageReceived += received;
+            socket.Error += errored;
             socket.Closed += closed;
 
             dispose[0] = () =>
             {
-                incoming.Complete();
+                incoming.OnCompleted();
                 socket.MessageReceived -= received;
                 socket.Error -= errored;
                 socket.Closed -= closed;
