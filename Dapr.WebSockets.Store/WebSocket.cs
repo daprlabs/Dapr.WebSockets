@@ -1,6 +1,7 @@
 ﻿namespace Dapr.WebSockets
 {
     using System;
+    using System.Collections.Concurrent;
     using System.Reactive;
     using System.Reactive.Linq;
     using System.Reactive.Subjects;
@@ -17,78 +18,19 @@
     public static class WebSocket
     {
         /// <summary>
-        /// Connect to the provided WebSocket <paramref name="uri"/>, returning an observable used to receive messages.
-        /// </summary>
-        /// <param name="uri">The uri.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
-        /// <returns>The subject used to send and receive messages.</returns>
-        public static async Task<IObservable<string>> ConnectOutput(Uri uri, CancellationToken cancellationToken)
-        {
-            var socket = CreateSocket();
-            var cancellation = new CancellationTokenSource();
-            var result = SocketReceivePump(socket, cancellation.Token);
-            cancellation.Token.Register(socket.Dispose);
-            try
-            {
-                await socket.ConnectAsync(uri).AsTask(cancellation.Token);
-            }
-            catch
-            {
-                cancellation.Cancel();
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// Connect to the provided WebSocket <paramref name="uri"/>, returning an observer used to send messages.
-        /// </summary>
-        /// <param name="uri">The uri.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
-        /// <returns>The observer used to send messages.</returns>
-        public static async Task<IObserver<string>> ConnectInput(Uri uri, CancellationToken cancellationToken)
-        {
-            var cancellation = new CancellationTokenSource();
-            cancellationToken.Register(cancellation.Cancel);
-            var socket = CreateSocket();
-            var result = SocketSendPump(socket, cancellation.Token);
-            cancellation.Token.Register(socket.Dispose);
-            try
-            {
-                await socket.ConnectAsync(uri).AsTask(cancellation.Token);
-            }
-            catch
-            {
-                cancellation.Cancel();
-                throw;
-            }
-
-            return result;
-        }
-
-        /// <summary>
         /// Connect to the provided WebSocket <paramref name="uri"/>, returning a subject used to send and receive messages.
         /// </summary>
         /// <param name="uri">The uri.</param>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>The subject used to send and receive messages.</returns>
-        public static async Task<ISubject<string>> Connect(Uri uri, CancellationToken cancellationToken)
+        public static ISubject<string> Connect(Uri uri, CancellationToken cancellationToken)
         {
             var socket = CreateSocket();
             var cancellation = new CancellationTokenSource();
             cancellationToken.Register(cancellation.Cancel);
 
-            var subject = new CombinedSubject<string>(SocketReceivePump(socket, cancellation.Token), SocketSendPump(socket, cancellation.Token));
+            var subject = new CombinedSubject<string>(SocketReceivePump(socket, cancellation.Token), SocketSendPump(socket, uri, cancellation));
             cancellation.Token.Register(socket.Dispose);
-            try
-            {
-                await socket.ConnectAsync(uri).AsTask(cancellation.Token);
-            }
-            catch
-            {
-                cancellation.Cancel();
-                throw;
-            }
 
             return subject;
         }
@@ -112,28 +54,62 @@
         /// <param name="socket">
         /// The socket.
         /// </param>
-        /// <param name="cancellationToken">
-        /// The cancellation token.
+        /// <param name="uri">
+        /// The uri.
+        /// </param>
+        /// <param name="cancellation">
+        /// The cancellation.
         /// </param>
         /// <returns>
         /// The observer used to send messages to the socket.
         /// </returns>
-        private static IObserver<string> SocketSendPump(IWebSocket socket, CancellationToken cancellationToken)
+        private static IObserver<string> SocketSendPump(IWebSocket socket, Uri uri, CancellationTokenSource cancellation)
         {
+            var sender = new MutuallyExclusiveTaskExecutor();
+            sender.Schedule(
+                async () =>
+                {
+                    try
+                    {
+                        await socket.ConnectAsync(uri);
+                    }
+                    catch
+                    {
+                        cancellation.Cancel();
+                    }
+                });
+
             var writer = new DataWriter(socket.OutputStream);
             var subject = new Subject<string>();
-            var cancellation = new CancellationTokenSource();
             cancellation.Token.Register(
-                subject.SelectMany(
-                    async next =>
+                subject.Subscribe(
+                    next => sender.Schedule(
+                        async () =>
+                        {
+                            try
+                            {
+                                writer.WriteString(next);
+                                await writer.StoreAsync().AsTask(cancellation.Token);
+                            }
+                            catch
+                            {
+                                cancellation.Cancel();
+                            }
+                        }),
+                    e => cancellation.Cancel(),
+                    cancellation.Cancel).Dispose);
+            
+            sender.Run(cancellation.Token).ContinueWith(
+                _ =>
+                {
+                    if (_.Status != TaskStatus.RanToCompletion)
                     {
-                        writer.WriteString(next);
-                        await writer.StoreAsync().AsTask(cancellationToken);
-                        return Unit.Default;
-                    }).Subscribe(_ => { }, e => cancellation.Cancel(), cancellation.Cancel).Dispose);
+                        cancellation.Cancel();
+                    }
 
-            cancellationToken.Register(cancellation.Cancel);
-
+                    sender.Dispose();
+                },
+                CancellationToken.None);
             return subject.AsObserver();
         }
 
@@ -258,6 +234,69 @@
             public IDisposable Subscribe(IObserver<T> observer)
             {
                 return this.internalObservable.Subscribe(observer);
+            }
+        }
+
+        /// <summary>
+        /// The mutually exclusive task executor.
+        /// </summary>
+        private class MutuallyExclusiveTaskExecutor : IDisposable
+        {
+            /// <summary>
+            /// The tasks.
+            /// </summary>
+            private readonly ConcurrentQueue<Func<Task>> tasks = new ConcurrentQueue<Func<Task>>();
+
+            /// <summary>
+            /// The semaphore.
+            /// </summary>
+            private readonly SemaphoreSlim semaphore = new SemaphoreSlim(0);
+
+            /// <summary>
+            /// Enqueues the provided <paramref name="action"/> for execution.
+            /// </summary>
+            /// <param name="action">
+            /// The action being invoked.
+            /// </param>
+            public void Schedule(Func<Task> action)
+            {
+                this.tasks.Enqueue(action);
+                this.semaphore.Release();
+            }
+
+            /// <summary>
+            /// Invokes the executor.
+            /// </summary>
+            /// <param name="cancellationToken">The cancellation task.</param>
+            /// <returns>A <see cref="Task"/> representing the work performed</returns>
+            public async Task Run(CancellationToken cancellationToken)
+            {
+                var cancelled = cancellationToken.IsCancellationRequested;
+                while (!cancelled)
+                {
+                    cancelled = cancellationToken.IsCancellationRequested;
+                    await this.semaphore.WaitAsync(cancellationToken);
+
+                    // Process all available items in the queue.
+                    Func<Task> task;
+                    while (this.tasks.TryDequeue(out task))
+                    {
+                        // Execute the task we pulled out of the queue.
+                        await task();
+                    }
+                }
+            }
+
+            /// <summary>
+            /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
+            /// </summary>
+            /// <filterpriority>2</filterpriority>
+            public void Dispose()
+            {
+                if (this.semaphore != null)
+                {
+                    this.semaphore.Dispose();
+                }
             }
         }
     }

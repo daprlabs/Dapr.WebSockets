@@ -1,13 +1,19 @@
-﻿namespace Dapr.WebSockets
+﻿// --------------------------------------------------------------------------------------------------------------------
+// <summary>
+//   A reactive WebSocket abstraction.
+// </summary>
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace Dapr.WebSockets
 {
     using System;
-    using System.Reactive;
+    using System.Reactive.Concurrency;
+    using System.Reactive.Disposables;
     using System.Reactive.Linq;
     using System.Reactive.Subjects;
-    using System.Reactive.Threading.Tasks;
     using System.Threading;
     using System.Threading.Tasks;
-
+    
     using SuperSocket.ClientEngine;
 
     using WebSocket4Net;
@@ -18,115 +24,109 @@
     public static class WebSocket
     {
         /// <summary>
-        /// Connect to the provided WebSocket <paramref name="uri"/>, returning an observable used to receive messages.
+        /// The task scheduler.
         /// </summary>
-        /// <param name="uri">The uri.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
-        /// <returns>The subject used to send and receive messages.</returns>
-        public static async Task<IObservable<string>> ConnectOutput(Uri uri, CancellationToken cancellationToken)
-        {
-            var socket = await ConnectSocket(uri);
-            return SocketReceivePump(socket, cancellationToken);
-        }
-
-        /// <summary>
-        /// Connect to the provided WebSocket <paramref name="uri"/>, returning an observer used to send messages.
-        /// </summary>
-        /// <param name="uri">The uri.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
-        /// <returns>The observer used to send messages.</returns>
-        public static async Task<IObserver<string>> ConnectInput(Uri uri, CancellationToken cancellationToken)
-        {
-            var socket = await ConnectSocket(uri);
-            return SocketSendPump(socket, cancellationToken);
-        }
-
+        private static readonly IScheduler Scheduler = new TaskPoolScheduler(Task.Factory);
+        
         /// <summary>
         /// Connect to the provided WebSocket <paramref name="uri"/>, returning a subject used to send and receive messages.
         /// </summary>
         /// <param name="uri">The uri.</param>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>The subject used to send and receive messages.</returns>
-        public static async Task<ISubject<string>> Connect(Uri uri, CancellationToken cancellationToken)
+        public static ISubject<string> Connect(Uri uri, CancellationToken cancellationToken)
         {
-            var socket = await ConnectSocket(uri);
-            return new CombinedSubject<string>(SocketReceivePump(socket, cancellationToken), SocketSendPump(socket, cancellationToken));
-        }
-
-        /// <summary>
-        /// Return a connected <see cref="WebSocket"/>.
-        /// </summary>
-        /// <param name="uri">
-        /// The uri to connect the result to.
-        /// </param>
-        /// <returns>
-        /// A connected <see cref="WebSocket"/>.
-        /// </returns>
-        private static async Task<WebSocket4Net.WebSocket> ConnectSocket(Uri uri)
-        {
-            var socket = new WebSocket4Net.WebSocket(uri.ToString());
-            var opened = Observable.FromEventPattern(_ => socket.Opened += _, _ => socket.Opened -= _);
-            socket.Open();
-            await opened.ToTask();
-            return socket;
-        }
-
-        /// <summary>
-        /// The socket send pump.
-        /// </summary>
-        /// <param name="socket">
-        /// The socket.
-        /// </param>
-        /// <param name="cancellationToken">
-        /// The cancellation token.
-        /// </param>
-        /// <returns>
-        /// The observer used to send messages to the socket.
-        /// </returns>
-        private static IObserver<string> SocketSendPump(WebSocket4Net.WebSocket socket, CancellationToken cancellationToken)
-        {
-            return Observer.Create<string>(
-                next =>
-                {
-                    if (!cancellationToken.IsCancellationRequested)
-                    {
-                        socket.Send(next);
-                    }
-                    else
-                    {
-                        throw new OperationCanceledException("Cancellation was requested.");
-                    }
-                });
+            var cancellation = new CancellationTokenSource();
+            
+            var result = MessagePump(uri, cancellation);
+            cancellationToken.Register(cancellation.Cancel);
+            return result;
         }
 
         /// <summary>
         /// The pump for received messages.
         /// </summary>
-        /// <param name="socket">The socket.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <param name="uri">The uri.</param>
+        /// <param name="cancellation">The cancellation token source.</param>
         /// <returns>The observable stream of messages.</returns>
-        private static IObservable<string> SocketReceivePump(WebSocket4Net.WebSocket socket, CancellationToken cancellationToken)
+        private static CombinedSubject<string> MessagePump(Uri uri, CancellationTokenSource cancellation)
         {
-            var dispose = new Action[] { null };
-            var incoming = new Subject<string>();
-            EventHandler<MessageReceivedEventArgs> received = (sender, args) => incoming.OnNext(args.Message);
-            EventHandler<ErrorEventArgs> errored = (sender, args) => incoming.OnError(args.Exception);
-            EventHandler closed = (sender, args) => dispose[0]();
-            socket.MessageReceived += received;
-            socket.Error += errored;
-            socket.Closed += closed;
+            var outgoing = new Subject<string>();
+            var incoming = Observable.Create<string>(
+                observer =>
+                {
+                    var completed = false;
+                    EventHandler<MessageReceivedEventArgs> onMessage = (sender, args) => observer.OnNext(args.Message);
+                    EventHandler<ErrorEventArgs> onError = (sender, args) =>
+                    {
+                        observer.OnError(args.Exception);
+                        completed = true;
+                        cancellation.Cancel();
+                    };
+                    EventHandler onClosed = (sender, args) => cancellation.Cancel();
 
-            dispose[0] = () =>
-            {
-                incoming.OnCompleted();
-                socket.MessageReceived -= received;
-                socket.Error -= errored;
-                socket.Closed -= closed;
-                socket.Close();
-            };
-            cancellationToken.Register(dispose[0]);
+                    var socket = new WebSocket4Net.WebSocket(uri.ToString());
+                    socket.MessageReceived += onMessage;
+                    socket.Error += onError;
+                    socket.Closed += onClosed;
 
-            return incoming.AsObservable().Publish().RefCount();
+                    cancellation.Token.Register(
+                        () =>
+                        {
+                            if (!completed)
+                            {
+                                observer.OnCompleted();
+                            }
+
+                            socket.MessageReceived -= onMessage;
+                            socket.Error -= onError;
+                            socket.Closed -= onClosed;
+                            if (socket.State == WebSocketState.Open)
+                            {
+                                socket.Close();
+                            }
+                        });
+
+                    // Connect to the socket and subscribe to the 'outgoing' observable while the connection remains opened.
+                    try
+                    {
+                        var opened = Observable.FromEventPattern(_ => socket.Opened += _, _ => socket.Opened -= _).FirstAsync();
+                        var closed = Observable.FromEventPattern(_ => socket.Closed += _, _ => socket.Closed -= _).FirstAsync();
+
+                        var sendSubscription =
+                            opened.SelectMany(_ => outgoing)
+                                .TakeUntil(closed)
+                                .SubscribeOn(Scheduler)
+                                .ObserveOn(Scheduler)
+                                .Subscribe(
+                                    _ =>
+                                    {
+                                        try
+                                        {
+                                            socket.Send(_);
+                                        }
+                                        catch (Exception e)
+                                        {
+                                            observer.OnError(e);
+                                            completed = true;
+                                            cancellation.Cancel();
+                                            throw;
+                                        }
+                                    });
+                        socket.Open();
+                        cancellation.Token.Register(sendSubscription.Dispose);
+                    }
+                    catch (Exception e)
+                    {
+                        observer.OnError(e);
+                        completed = true;
+                        cancellation.Cancel();
+                        throw;
+                    }
+
+                    return Disposable.Create(cancellation.Cancel);
+                }).SubscribeOn(Scheduler).ObserveOn(Scheduler).Publish().RefCount();
+            return new CombinedSubject<string>(incoming, outgoing);
         }
 
         /// <summary>

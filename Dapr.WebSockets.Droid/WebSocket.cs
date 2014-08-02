@@ -1,16 +1,22 @@
-﻿namespace Dapr.WebSockets
+﻿// --------------------------------------------------------------------------------------------------------------------
+// <summary>
+//   A reactive WebSocket abstraction.
+// </summary>
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace Dapr.WebSockets
 {
     using System;
-    using System.Collections.Concurrent;
-    using System.Net.WebSockets;
-    using System.Reactive;
+    using System.Reactive.Concurrency;
     using System.Reactive.Disposables;
     using System.Reactive.Linq;
     using System.Reactive.Subjects;
-    using System.Reactive.Threading.Tasks;
-    using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
+    
+    using SuperSocket.ClientEngine;
+
+    using WebSocket4Net;
 
     /// <summary>
     /// A reactive WebSocket abstraction.
@@ -18,163 +24,114 @@
     public static class WebSocket
     {
         /// <summary>
-        /// Connect to the provided WebSocket <paramref name="uri"/>, returning an observable used to receive messages.
+        /// The task scheduler.
         /// </summary>
-        /// <param name="uri">The uri.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
-        /// <returns>The subject used to send and receive messages.</returns>
-        public static async Task<IObservable<string>> ConnectOutput(Uri uri, CancellationToken cancellationToken)
-        {
-            var socket = new ClientWebSocket();
-            await socket.ConnectAsync(uri, cancellationToken);
-            return SocketReceivePump(socket, cancellationToken);
-        }
-
-        /// <summary>
-        /// Connect to the provided WebSocket <paramref name="uri"/>, returning an observer used to send messages.
-        /// </summary>
-        /// <param name="uri">The uri.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
-        /// <returns>The observer used to send messages.</returns>
-        public static async Task<IObserver<string>> ConnectInput(Uri uri, CancellationToken cancellationToken)
-        {
-            var socket = new ClientWebSocket();
-            await socket.ConnectAsync(uri, cancellationToken);
-            var cancellation = new CancellationTokenSource();
-            cancellationToken.Register(cancellation.Cancel);
-            cancellation.Token.Register(socket.Dispose);
-            return SocketSendPump(socket, cancellation);
-        }
-
+        private static readonly IScheduler Scheduler = new TaskPoolScheduler(Task.Factory);
+        
         /// <summary>
         /// Connect to the provided WebSocket <paramref name="uri"/>, returning a subject used to send and receive messages.
         /// </summary>
         /// <param name="uri">The uri.</param>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>The subject used to send and receive messages.</returns>
-        public static async Task<ISubject<string>> Connect(Uri uri, CancellationToken cancellationToken)
+        public static ISubject<string> Connect(Uri uri, CancellationToken cancellationToken)
         {
-            var socket = new ClientWebSocket();
-            await socket.ConnectAsync(uri, cancellationToken);
-
             var cancellation = new CancellationTokenSource();
+            
+            var result = MessagePump(uri, cancellation);
             cancellationToken.Register(cancellation.Cancel);
-            cancellation.Token.Register(socket.Dispose);
-            return new CombinedSubject<string>(SocketReceivePump(socket, cancellation.Token), SocketSendPump(socket, cancellation));
-        }
-
-        /// <summary>
-        /// The socket send pump.
-        /// </summary>
-        /// <param name="socket">
-        /// The socket.
-        /// </param>
-        /// <param name="cancellation">
-        /// The cancellation token source.
-        /// </param>
-        /// <returns>
-        /// The observer used to send messages to the socket.
-        /// </returns>
-        private static IObserver<string> SocketSendPump(ClientWebSocket socket, CancellationTokenSource cancellation)
-        {
-            var buffer = new byte[0];
-            var subject = new Subject<string>();
-            var actor = new MutuallyExclusiveTaskExecutor();
-            var subscription = subject.Subscribe(
-                next => actor.Enqueue(
-                    async () =>
-                    {
-                        ArraySegment<byte> segment;
-                        if (Encoding.UTF8.GetByteCount(next) > buffer.Length)
-                        {
-                            // The buffer is too small to hold the result, so it cannot be reused.
-                            // Create a larger buffer for next time.
-                            buffer = Encoding.UTF8.GetBytes(next);
-                            segment = new ArraySegment<byte>(buffer);
-                        }
-                        else
-                        {
-                            // Reuse existing buffer.
-                            var count = Encoding.UTF8.GetBytes(next, 0, next.Length, buffer, 0);
-                            segment = new ArraySegment<byte>(buffer, 0, count);
-                        }
-
-                        await socket.SendAsync(segment, WebSocketMessageType.Text, true, cancellation.Token);
-                    }));
-            actor.Run(cancellation.Token).ContinueWith(_ => cancellation.Cancel());
-            cancellation.Token.Register(subscription.Dispose);
-
-            return subject.AsObserver();
+            return result;
         }
 
         /// <summary>
         /// The pump for received messages.
         /// </summary>
-        /// <param name="socket">The socket.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <param name="uri">The uri.</param>
+        /// <param name="cancellation">The cancellation token source.</param>
         /// <returns>The observable stream of messages.</returns>
-        private static IObservable<string> SocketReceivePump(ClientWebSocket socket, CancellationToken cancellationToken)
+        private static CombinedSubject<string> MessagePump(Uri uri, CancellationTokenSource cancellation)
         {
-            return Observable.Create<string>(
+            var outgoing = new Subject<string>();
+            var incoming = Observable.Create<string>(
                 observer =>
                 {
-                    var cancellation = new CancellationTokenSource();
-                    var subscription = ReceivePump(observer, socket, cancellation.Token).ToObservable().Subscribe(_ => { }, observer.OnError);
-                    cancellation.Token.Register(subscription.Dispose);
-                    cancellationToken.Register(cancellation.Cancel);
-                    return Disposable.Create(cancellation.Cancel);
-                }).Publish().RefCount();
-        }
-
-        /// <summary>
-        /// The pump for received messages.
-        /// </summary>
-        /// <param name="observer">The observer.</param>
-        /// <param name="socket">The socket.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
-        /// <returns>A <see cref="Task"/> representing the work performed.</returns>
-        private static async Task ReceivePump(IObserver<string> observer, ClientWebSocket socket, CancellationToken cancellationToken)
-        {
-            try
-            {
-                var buffer = new ArraySegment<byte>(new byte[4096]);
-                while (!cancellationToken.IsCancellationRequested)
-                {
-                    var received = await ReceiveString(socket, buffer, cancellationToken);
-                    if (socket.CloseStatus.HasValue)
+                    var completed = false;
+                    EventHandler<MessageReceivedEventArgs> onMessage = (sender, args) => observer.OnNext(args.Message);
+                    EventHandler<ErrorEventArgs> onError = (sender, args) =>
                     {
-                        observer.OnCompleted();
-                        return;
+                        observer.OnError(args.Exception);
+                        completed = true;
+                        cancellation.Cancel();
+                    };
+                    EventHandler onClosed = (sender, args) => cancellation.Cancel();
+
+                    var socket = new WebSocket4Net.WebSocket(uri.ToString());
+                    socket.MessageReceived += onMessage;
+                    socket.Error += onError;
+                    socket.Closed += onClosed;
+
+                    cancellation.Token.Register(
+                        () =>
+                        {
+                            if (!completed)
+                            {
+                                observer.OnCompleted();
+                            }
+
+                            socket.MessageReceived -= onMessage;
+                            socket.Error -= onError;
+                            socket.Closed -= onClosed;
+                            try
+                            {
+                                socket.Close();
+                            }
+                            catch (Exception exception)
+                            {
+                                // Ignore errors closing the socket, but write them to debug output.
+                                System.Diagnostics.Debug.WriteLine("Exception closing connection: {0}", exception);
+                            }
+                        });
+
+                    // Connect to the socket and subscribe to the 'outgoing' observable while the connection remains opened.
+                    try
+                    {
+                        var opened = Observable.FromEventPattern(_ => socket.Opened += _, _ => socket.Opened -= _).FirstAsync();
+                        var closed = Observable.FromEventPattern(_ => socket.Closed += _, _ => socket.Closed -= _).FirstAsync();
+
+                        var sendSubscription =
+                            opened.SelectMany(_ => outgoing)
+                                .TakeUntil(closed)
+                                .SubscribeOn(Scheduler)
+                                .ObserveOn(Scheduler)
+                                .Subscribe(
+                                    _ =>
+                                    {
+                                        try
+                                        {
+                                            socket.Send(_);
+                                        }
+                                        catch (Exception e)
+                                        {
+                                            observer.OnError(e);
+                                            completed = true;
+                                            cancellation.Cancel();
+                                            throw;
+                                        }
+                                    });
+                        socket.Open();
+                        cancellation.Token.Register(sendSubscription.Dispose);
+                    }
+                    catch (Exception e)
+                    {
+                        observer.OnError(e);
+                        completed = true;
+                        cancellation.Cancel();
+                        throw;
                     }
 
-                    observer.OnNext(received);
-                }
-            }
-            catch (Exception e)
-            {
-                observer.OnError(e);
-            }
-        }
-
-        /// <summary>
-        /// Receive a single string from the provided <paramref name="socket"/>.
-        /// </summary>
-        /// <param name="socket">The socket.</param>
-        /// <param name="buffer">The scratch buffer.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
-        /// <returns>The received string.</returns>
-        private static async Task<string> ReceiveString(ClientWebSocket socket, ArraySegment<byte> buffer, CancellationToken cancellationToken)
-        {
-            var result = new StringBuilder();
-            WebSocketReceiveResult received;
-            do
-            {
-                received = await socket.ReceiveAsync(buffer, cancellationToken);
-                result.Append(Encoding.UTF8.GetString(buffer.Array, buffer.Offset, received.Count));
-            }
-            while (!cancellationToken.IsCancellationRequested && !received.EndOfMessage);
-
-            return result.ToString();
+                    return Disposable.Create(cancellation.Cancel);
+                }).SubscribeOn(Scheduler).ObserveOn(Scheduler).Publish().RefCount();
+            return new CombinedSubject<string>(incoming, outgoing);
         }
 
         /// <summary>
@@ -246,55 +203,6 @@
             public IDisposable Subscribe(IObserver<T> observer)
             {
                 return this.internalObservable.Subscribe(observer);
-            }
-        }
-                
-        /// <summary>
-        /// The mutually exclusive task executor.
-        /// </summary>
-        private class MutuallyExclusiveTaskExecutor
-        {
-            /// <summary>
-            /// The tasks.
-            /// </summary>
-            private readonly ConcurrentQueue<Func<Task>> tasks = new ConcurrentQueue<Func<Task>>();
-
-            /// <summary>
-            /// The semaphore.
-            /// </summary>
-            private readonly SemaphoreSlim semaphore = new SemaphoreSlim(0);
-
-            /// <summary>
-            /// Enqueues the provided <paramref name="action"/> for execution.
-            /// </summary>
-            /// <param name="action">
-            /// The action being invoked.
-            /// </param>
-            public void Enqueue(Func<Task> action)
-            {
-                this.tasks.Enqueue(action);
-                this.semaphore.Release();
-            }
-
-            /// <summary>
-            /// Invokes the executor.
-            /// </summary>
-            /// <param name="cancellationToken">The cancellation task.</param>
-            /// <returns>A <see cref="Task"/> representing the work performed</returns>
-            public async Task Run(CancellationToken cancellationToken)
-            {
-                while (!cancellationToken.IsCancellationRequested)
-                {
-                    await this.semaphore.WaitAsync(cancellationToken);
-
-                    // Process all available items in the queue.
-                    Func<Task> task;
-                    while (this.tasks.TryDequeue(out task))
-                    {
-                        // Execute the task we pulled out of the queue 
-                        await task();
-                    }
-                }
             }
         }
     }
