@@ -36,6 +36,9 @@
     <CodesignKey>iPhone Developer</CodesignKey>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="ConnectionStatus.cs" />
+    <Compile Include="ObservableSocket.cs" />
+    <Compile Include="WebSocket - Copy.cs" />
     <Compile Include="WebSocket.cs">
       <SubType>
       </SubType>
@@ -67,9 +70,6 @@
     <Reference Include="System.Xml" />
     <Reference Include="System.Core" />
     <Reference Include="monotouch" />
-    <Reference Include="WebSocket4Net">
-      <HintPath>..\packages\WebSocket4Net.0.10\lib\monotouch10\WebSocket4Net.dll</HintPath>
-    </Reference>
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\Xamarin\iOS\Xamarin.MonoTouch.CSharp.targets" />
   <Import Project="$(SolutionDir)\.nuget\NuGet.targets" Condition="Exists('$(SolutionDir)\.nuget\NuGet.targets')" />
