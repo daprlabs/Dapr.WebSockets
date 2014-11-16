@@ -36,6 +36,10 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="ConnectionStatus.cs" />
+    <Compile Include="IObservableSocket.cs" />
+    <Compile Include="NotConnectedException.cs" />
+    <Compile Include="ObservableSocket.cs" />
     <Compile Include="WebSocket.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

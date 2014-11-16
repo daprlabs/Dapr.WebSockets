@@ -2,7 +2,7 @@
 <package >
   <metadata>
     <id>Dapr.WebSockets</id>
-    <version>0.1.92</version>
+    <version>0.2.1</version>
     <authors>Reuben Bond</authors>
     <owners>Dapr Labs</owners>
     <projectUrl>https://github.com/daprlabs/WebStream.Client</projectUrl>
@@ -11,7 +11,7 @@
     <iconUrl>http://ICON_URL_HERE_OR_DELETE_THIS_LINE</iconUrl> -->
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <description>Portable Class Library for WebSockets, wrapping platform-specific APIs.</description>
-    <releaseNotes>Moved to WebSocket4Net implementation on iOS, since Mono is broken.</releaseNotes>
+    <releaseNotes>Moved to built-in implementation on Xamarin and NET45, working around broken Mono.</releaseNotes>
     <copyright>Copyright 2014</copyright>
     <tags>WebSockets WebSocket Xamarin Mono Droid Touch PCL</tags>
     <dependencies>
@@ -23,11 +23,9 @@
         <dependency id="Rx-Main" version="2.2.5" />
       </group>
       <group targetFramework="MonoTouch">
-        <dependency id="WebSocket4Net" version="0.10" />
         <dependency id="Rx-Main" version="2.2.5" />
       </group>
       <group targetFramework="MonoAndroid">
-        <dependency id="WebSocket4Net" version="0.10" />
         <dependency id="Rx-Main" version="2.2.5" />
       </group>
     </dependencies>

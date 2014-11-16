@@ -57,14 +57,33 @@
     </Reference>
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Xml" />
-    <Reference Include="WebSocket4Net, Version=0.10.0.0, Culture=neutral, PublicKeyToken=eb4e154b696bf72a, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\packages\WebSocket4Net.0.10\lib\monoandroid22\WebSocket4Net.dll</HintPath>
-    </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="WebSocket.cs" />
-    <Compile Include="WebSocket_d.cs" />
+    <Compile Include="..\Dapr.WebSockets.Net45\ExceptionExtensions.cs">
+      <Link>ExceptionExtensions.cs</Link>
+    </Compile>
+    <Compile Include="..\Dapr.WebSockets.Net45\MutuallyExclusiveTaskExecutor.cs">
+      <Link>MutuallyExclusiveTaskExecutor.cs</Link>
+    </Compile>
+    <Compile Include="..\Dapr.WebSockets.Net45\ObservableClientWebSocket.cs">
+      <Link>ObservableClientWebSocket.cs</Link>
+    </Compile>
+    <Compile Include="..\Dapr.WebSockets.Net45\TaskExtensions.cs">
+      <Link>TaskExtensions.cs</Link>
+    </Compile>
+    <Compile Include="..\Dapr.WebSockets.Net45\WebSocket.cs">
+      <Link>WebSocket.cs</Link>
+    </Compile>
+    <Compile Include="..\Dapr.WebSockets.Portable\ConnectionStatus.cs">
+      <Link>ConnectionStatus.cs</Link>
+    </Compile>
+    <Compile Include="..\Dapr.WebSockets.Portable\IObservableSocket.cs">
+      <Link>IObservableSocket.cs</Link>
+    </Compile>
+    <Compile Include="..\Dapr.WebSockets.Portable\NotConnectedException.cs">
+      <Link>NotConnectedException.cs</Link>
+    </Compile>
+    <Compile Include="WebSocket_Disabled.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

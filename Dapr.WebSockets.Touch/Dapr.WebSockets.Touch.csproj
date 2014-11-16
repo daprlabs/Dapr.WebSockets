@@ -36,12 +36,32 @@
     <CodesignKey>iPhone Developer</CodesignKey>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="ConnectionStatus.cs" />
-    <Compile Include="ObservableSocket.cs" />
-    <Compile Include="WebSocket - Copy.cs" />
-    <Compile Include="WebSocket.cs">
-      <SubType>
-      </SubType>
+    <Compile Include="..\Dapr.WebSockets.Net45\ExceptionExtensions.cs">
+      <Link>ExceptionExtensions.cs</Link>
+    </Compile>
+    <Compile Include="..\Dapr.WebSockets.Net45\MutuallyExclusiveTaskExecutor.cs">
+      <Link>MutuallyExclusiveTaskExecutor.cs</Link>
+    </Compile>
+    <Compile Include="..\Dapr.WebSockets.Net45\ObservableClientWebSocket.cs">
+      <Link>ObservableClientWebSocket.cs</Link>
+    </Compile>
+    <Compile Include="..\Dapr.WebSockets.Net45\TaskExtensions.cs">
+      <Link>TaskExtensions.cs</Link>
+    </Compile>
+    <Compile Include="..\Dapr.WebSockets.Net45\WebSocket.cs">
+      <Link>WebSocket.cs</Link>
+    </Compile>
+    <Compile Include="..\Dapr.WebSockets.Portable\ConnectionStatus.cs">
+      <Link>ConnectionStatus.cs</Link>
+    </Compile>
+    <Compile Include="..\Dapr.WebSockets.Portable\IObservableSocket.cs">
+      <Link>IObservableSocket.cs</Link>
+    </Compile>
+    <Compile Include="..\Dapr.WebSockets.Portable\NotConnectedException.cs">
+      <Link>NotConnectedException.cs</Link>
+    </Compile>
+    <Compile Include="..\Dapr.WebSockets.Portable\ObservableSocket.cs">
+      <Link>ObservableSocket.cs</Link>
     </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

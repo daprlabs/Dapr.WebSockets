@@ -1,8 +1,14 @@
-﻿namespace Dapr.WebSockets
+﻿// --------------------------------------------------------------------------------------------------------------------
+// <summary>
+//   A reactive WebSocket abstraction.
+// </summary>
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace Dapr.WebSockets
 {
     using System;
     using System.Collections.Concurrent;
-    using System.Reactive;
+    using System.Reactive.Disposables;
     using System.Reactive.Linq;
     using System.Reactive.Subjects;
     using System.Threading;
@@ -20,19 +26,96 @@
         /// <summary>
         /// Connect to the provided WebSocket <paramref name="uri"/>, returning a subject used to send and receive messages.
         /// </summary>
-        /// <param name="uri">The uri.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
-        /// <returns>The subject used to send and receive messages.</returns>
-        public static ISubject<string> Connect(Uri uri, CancellationToken cancellationToken)
+        /// <param name="uri">
+        /// The uri.
+        /// </param>
+        /// <param name="cancellationToken">
+        /// The cancellation token.
+        /// </param>
+        /// <returns>
+        /// The subject used to send and receive messages.
+        /// </returns>
+        public static IObservableSocket Connect(Uri uri, CancellationToken cancellationToken)
         {
-            var socket = CreateSocket();
             var cancellation = new CancellationTokenSource();
             cancellationToken.Register(cancellation.Cancel);
+            return CreateObservableSocket(uri, cancellation);
+        }
 
-            var subject = new CombinedSubject<string>(SocketReceivePump(socket, cancellation.Token), SocketSendPump(socket, uri, cancellation));
-            cancellation.Token.Register(socket.Dispose);
+        /// <summary>
+        /// Returns a new observable socket.
+        /// </summary>
+        /// <param name="uri">
+        /// The uri.
+        /// </param>
+        /// <param name="cancellation">
+        /// The cancellation.
+        /// </param>
+        /// <returns>
+        /// The <see cref="ObservableSocket"/>.
+        /// </returns>
+        private static ObservableSocket CreateObservableSocket(Uri uri, CancellationTokenSource cancellation)
+        {
+            var status = new ReplaySubject<ConnectionStatus>(1);
+            Func<string, Task> send = ThrowOnSend;
+            var connected = new TaskCompletionSource<int>();
+            var incoming = Observable.Create<string>(
+                observer =>
+                {
+                    status.OnNext(ConnectionStatus.Connecting);
+                    bool[] completed = { false };
 
-            return subject;
+                    try
+                    {
+                        var socket = CreateSocket();
+                        SocketReceivePump(socket, cancellation.Token).Subscribe(
+                            observer.OnNext,
+                            exception =>
+                            {
+                                observer.OnError(exception);
+                                completed[0] = true;
+                                cancellation.Cancel();
+                            },
+                            cancellation.Cancel);
+
+                        cancellation.Token.Register(
+                            () =>
+                            {
+                                if (!completed[0])
+                                {
+                                    observer.OnCompleted();
+                                }
+
+                                try
+                                {
+                                    socket.Close(1000, string.Empty);
+                                }
+                                // ReSharper disable once EmptyGeneralCatchClause
+                                catch
+                                {
+                                    // Ignore errors closing the socket.
+                                }
+                                finally
+                                {
+                                    status.OnNext(ConnectionStatus.Closed);
+                                }
+                            });
+
+                        send = SocketSendPump(socket, uri, cancellation, connected);
+                        status.OnNext(ConnectionStatus.Opened);
+                    }
+                    catch (Exception e)
+                    {
+                        observer.OnError(e);
+                        completed[0] = true;
+                        cancellation.Cancel();
+                        throw;
+                    }
+
+                    return Disposable.Create(cancellation.Cancel);
+                }).Publish().RefCount();
+
+            return new ObservableSocket(incoming, send, status, connected.Task);
         }
 
         /// <summary>
@@ -63,7 +146,7 @@
         /// <returns>
         /// The observer used to send messages to the socket.
         /// </returns>
-        private static IObserver<string> SocketSendPump(IWebSocket socket, Uri uri, CancellationTokenSource cancellation)
+        private static Func<string, Task> SocketSendPump(IWebSocket socket, Uri uri, CancellationTokenSource cancellation, TaskCompletionSource<int> connected)
         {
             var sender = new MutuallyExclusiveTaskExecutor();
             sender.Schedule(
@@ -71,7 +154,8 @@
                 {
                     try
                     {
-                        await socket.ConnectAsync(uri);
+                        await socket.ConnectAsync(uri).AsTask(cancellation.Token).ConfigureAwait(false);
+                        connected.TrySetResult(0);
                     }
                     catch
                     {
@@ -80,24 +164,6 @@
                 });
 
             var writer = new DataWriter(socket.OutputStream);
-            var subject = new Subject<string>();
-            cancellation.Token.Register(
-                subject.Subscribe(
-                    next => sender.Schedule(
-                        async () =>
-                        {
-                            try
-                            {
-                                writer.WriteString(next);
-                                await writer.StoreAsync().AsTask(cancellation.Token);
-                            }
-                            catch
-                            {
-                                cancellation.Cancel();
-                            }
-                        }),
-                    e => cancellation.Cancel(),
-                    cancellation.Cancel).Dispose);
             
             sender.Run(cancellation.Token).ContinueWith(
                 _ =>
@@ -110,41 +176,80 @@
                     sender.Dispose();
                 },
                 CancellationToken.None);
-            return subject.AsObserver();
+            return next => sender.Schedule(
+                async () =>
+                    {
+                        try
+                        {
+                            writer.WriteString(next);
+                            await writer.StoreAsync().AsTask(cancellation.Token).ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            cancellation.Cancel();
+                        }
+                    });
         }
 
         /// <summary>
         /// The pump for received messages.
         /// </summary>
-        /// <param name="socket">The socket.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
-        /// <returns>The observable stream of messages.</returns>
+        /// <param name="socket">
+        /// The socket.
+        /// </param>
+        /// <param name="cancellationToken">
+        /// The cancellation token source.
+        /// </param>
+        /// <returns>
+        /// The observable stream of messages.
+        /// </returns>
         private static IObservable<string> SocketReceivePump(MessageWebSocket socket, CancellationToken cancellationToken)
         {
-            var subject = new Subject<string>();
-            TypedEventHandler<MessageWebSocket, MessageWebSocketMessageReceivedEventArgs> read = (sender, args) =>
-            {
-                try
+            return Observable.Create<string>(
+                observer =>
                 {
-                    if (cancellationToken.IsCancellationRequested)
+                    var cancellation = new CancellationTokenSource();
+                    cancellationToken.Register(cancellation.Cancel);
+                    TypedEventHandler<MessageWebSocket, MessageWebSocketMessageReceivedEventArgs> read = (sender, args) =>
                     {
-                        subject.OnCompleted();
-                        return;
-                    }
+                        try
+                        {
+                            if (cancellation.Token.IsCancellationRequested)
+                            {
+                                return;
+                            }
 
-                    subject.OnNext(ReadString(args));
-                }
-                catch (Exception e)
-                {
-                    subject.OnError(e);
-                }
-            };
-            TypedEventHandler<IWebSocket, WebSocketClosedEventArgs> closed = (sender, args) => subject.OnCompleted();
-            socket.MessageReceived += read;
-            socket.Closed += closed;
+                            observer.OnNext(ReadString(args));
+                        }
+                        catch (Exception e)
+                        {
+                            observer.OnError(e);
+                            cancellation.Cancel();
+                        }
+                    };
+                    TypedEventHandler<IWebSocket, WebSocketClosedEventArgs> closed = (sender, args) =>
+                    {
+                        observer.OnCompleted();
+                        cancellation.Cancel();
+                    };
+                    socket.MessageReceived += read;
+                    socket.Closed += closed;
 
-            cancellationToken.Register(subject.OnCompleted);
-            return subject.AsObservable();
+                    cancellation.Token.Register(
+                        () =>
+                        {
+                            try
+                            {
+                                socket.Closed -= closed;
+                                socket.MessageReceived -= read;
+                            }
+                            catch (ObjectDisposedException)
+                            {
+                            }
+                        });
+
+                    return cancellation.Cancel;
+                });
         }
 
         /// <summary>
@@ -164,77 +269,15 @@
                 return stream.ReadString(stream.UnconsumedBufferLength);
             }
         }
-        
+
         /// <summary>
-        /// Represents an <see cref="ISubject{T}"/> backed by an observer and an observable.
+        /// Throws an exception when invoked.
         /// </summary>
-        /// <typeparam name="T">
-        /// The underlying stream type.
-        /// </typeparam>
-        private struct CombinedSubject<T> : ISubject<T>
+        /// <param name="message">The message.</param>
+        /// <returns>A <see cref="Task"/> representing the work performed.</returns>
+        private static Task ThrowOnSend(string message)
         {
-            /// <summary>
-            /// The observer.
-            /// </summary>
-            private readonly IObserver<T> internalObserver;
-
-            /// <summary>
-            /// The observable.
-            /// </summary>
-            private readonly IObservable<T> internalObservable;
-
-            /// <summary>
-            /// Initializes a new instance of the <see cref="CombinedSubject{T}"/> struct.
-            /// </summary>
-            /// <param name="observable">
-            /// The observable.
-            /// </param>
-            /// <param name="observer">
-            /// The observer.
-            /// </param>
-            public CombinedSubject(IObservable<T> observable, IObserver<T> observer)
-            {
-                this.internalObservable = observable;
-                this.internalObserver = observer;
-            }
-
-            /// <summary>
-            /// Notifies the observer that the provider has finished sending push-based notifications.
-            /// </summary>
-            public void OnCompleted()
-            {
-                this.internalObserver.OnCompleted();
-            }
-
-            /// <summary>
-            /// Notifies the observer that the provider has experienced an error condition.
-            /// </summary>
-            /// <param name="error">An object that provides additional information about the error.</param>
-            public void OnError(Exception error)
-            {
-                this.internalObserver.OnError(error);
-            }
-
-            /// <summary>
-            /// Provides the observer with new data.
-            /// </summary>
-            /// <param name="value">The current notification information.</param>
-            public void OnNext(T value)
-            {
-                this.internalObserver.OnNext(value);
-            }
-
-            /// <summary>
-            /// Notifies the provider that an observer is to receive notifications.
-            /// </summary>
-            /// <returns>
-            /// A reference to an interface that allows observers to stop receiving notifications before the provider has finished sending them.
-            /// </returns>
-            /// <param name="observer">The object that is to receive notifications.</param>
-            public IDisposable Subscribe(IObserver<T> observer)
-            {
-                return this.internalObservable.Subscribe(observer);
-            }
+            throw new NotConnectedException();
         }
 
         /// <summary>
@@ -258,10 +301,27 @@
             /// <param name="action">
             /// The action being invoked.
             /// </param>
-            public void Schedule(Func<Task> action)
+            /// <returns>
+            /// A <see cref="Task"/> representing the work performed.
+            /// </returns>
+            public Task Schedule(Func<Task> action)
             {
-                this.tasks.Enqueue(action);
+                var completion = new TaskCompletionSource<int>();
+                this.tasks.Enqueue(
+                    async () =>
+                        {
+                            try
+                            {
+                                await action().ConfigureAwait(false);
+                                completion.SetResult(0);
+                            }
+                            catch (Exception e)
+                            {
+                                completion.SetException(e);
+                            }
+                        });
                 this.semaphore.Release();
+                return completion.Task;
             }
 
             /// <summary>
@@ -275,14 +335,14 @@
                 while (!cancelled)
                 {
                     cancelled = cancellationToken.IsCancellationRequested;
-                    await this.semaphore.WaitAsync(cancellationToken);
+                    await this.semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
 
                     // Process all available items in the queue.
                     Func<Task> task;
                     while (this.tasks.TryDequeue(out task))
                     {
                         // Execute the task we pulled out of the queue.
-                        await task();
+                        await task().ConfigureAwait(false);
                     }
                 }
             }

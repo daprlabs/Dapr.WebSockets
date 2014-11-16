@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 2013
-VisualStudioVersion = 12.0.30501.0
+VisualStudioVersion = 12.0.30723.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapr.WebSockets.Droid", "Dapr.WebSockets.Droid\Dapr.WebSockets.Droid.csproj", "{25B6C668-0A6A-4106-AE4E-0171A671388B}"
 EndProject
@@ -13,7 +13,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapr.WebSockets.Portable", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapr.WebSockets.Wpa8", "Dapr.WebSockets.Wpa8\Dapr.WebSockets.Wpa8.csproj", "{6F2C9A77-F240-4166-92D8-244BF1178B54}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapr.WebSockets.Store", "Dapr.WebSockets.Store\Dapr.WebSockets.Store.csproj", "{E2FA4D07-23F6-40A9-9DB9-56CE7E65CE37}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapr.WebSockets.Win", "Dapr.WebSockets.Store\Dapr.WebSockets.Win.csproj", "{E2FA4D07-23F6-40A9-9DB9-56CE7E65CE37}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapr.WebSockets.Wp8", "Dapr.WebSockets.Wp8\Dapr.WebSockets.Wp8.csproj", "{709897D1-994A-4438-91C7-ACF6585614CB}"
 EndProject
